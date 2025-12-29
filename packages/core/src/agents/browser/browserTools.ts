@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { browserManager } from './browserManager.js';
+import type { BrowserManager } from './browserManager.js';
+import { debugLogger } from '../../utils/debugLogger.js';
 
 export interface ToolResult {
   output?: string;
@@ -13,9 +14,15 @@ export interface ToolResult {
 }
 
 export class BrowserTools {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async showOverlay(page: any, message: string): Promise<void> {
-    await page.evaluate((msg: string) => {
+  constructor(private browserManager: BrowserManager) {}
+
+  async showOverlay(message: string): Promise<void> {
+    await this.browserManager.getMcpClient();
+    // Interpolate the message directly into the script since MCP evaluate_script
+    // doesn't support passing arbitrary primitive args.
+    const safeMessage = JSON.stringify(message);
+    const scriptWithMsg = `() => {
+      const msg = ${safeMessage};
       let overlay = document.getElementById('gemini-overlay');
       if (!overlay) {
         overlay = document.createElement('div');
@@ -38,18 +45,28 @@ export class BrowserTools {
         document.body.appendChild(overlay);
       }
       overlay.innerText = msg;
-    }, message);
+    }`;
+
+    const client = await this.browserManager.getMcpClient();
+    try {
+      await client.callTool('evaluate_script', { function: scriptWithMsg });
+    } catch (err) {
+      debugLogger.log(`Failed to show overlay: ${err}`);
+    }
   }
 
-  async updateBorderOverlay(options: { active: boolean; capturing: boolean }): Promise<void> {
-    try {
-      const page = await browserManager.getPage();
-      await page.evaluate(({ active, capturing }) => {
+  async updateBorderOverlay(options: {
+    active: boolean;
+    capturing: boolean;
+  }): Promise<void> {
+    const safeOptions = JSON.stringify(options);
+    const script = `() => {
+        const { active, capturing } = ${safeOptions};
         // 1. Inject CSS if not present
         if (!document.getElementById('gemini-border-style')) {
           const style = document.createElement('style');
           style.id = 'gemini-border-style';
-          style.textContent = `
+          style.textContent = \`
             :root {
               --color-blue: rgb(0, 102, 255);
               --color-blue-glow: rgba(0, 102, 255, 0.9);
@@ -82,7 +99,7 @@ export class BrowserTools {
             #preact-border-container.animate-breathing {
               animation: breathe 3s ease-in-out infinite;
             }
-          `;
+          \`;
           document.head.appendChild(style);
         }
 
@@ -106,193 +123,49 @@ export class BrowserTools {
           container.classList.add('hidden');
           container.classList.remove('animate-breathing');
         }
-      }, options);
-    } catch (_e) {
-      // Ignore errors (e.g. page closed)
+    }`;
+    const client = await this.browserManager.getMcpClient();
+    try {
+      await client.callTool('evaluate_script', { function: script });
+    } catch (err) {
+      debugLogger.log(`Failed to update border overlay: ${err}`);
     }
   }
 
   async removeOverlay(): Promise<void> {
-    try {
-      const page = await browserManager.getPage();
-      await page.evaluate(() => {
+    const script = `() => {
         const overlay = document.getElementById('gemini-overlay');
         if (overlay) {
           overlay.remove();
         }
-      });
-    } catch (_e) {
-      // Ignore errors if page is closed or not available
+    }`;
+    const client = await this.browserManager.getMcpClient();
+    try {
+      await client.callTool('evaluate_script', { function: script });
+    } catch (err) {
+      debugLogger.log(`Failed to remove overlay: ${err}`);
     }
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async moveMouse(page: any, x: number, y: number): Promise<void> {
-    await page.evaluate(
-      ({ x, y }: { x: number; y: number }) => {
-        let cursor = document.getElementById('gemini-cursor');
-        if (!cursor) {
-          cursor = document.createElement('div');
-          cursor.id = 'gemini-cursor';
-          cursor.style.position = 'fixed';
-          cursor.style.zIndex = '2147483648';
-          cursor.style.pointerEvents = 'none';
-          cursor.style.transition =
-            'top 0.2s ease-out, left 0.2s ease-out, opacity 0.2s ease-in-out, transform 0.1s ease-in-out, background-color 0.1s ease-in-out, width 0.2s, height 0.2s, border-radius 0.2s';
-          cursor.style.transform = 'translate(-50%, -50%)';
-          // Initialize at center to animate arrival
-          cursor.style.left = '50vw';
-          cursor.style.top = '50vh';
-          document.body.appendChild(cursor);
-          // Force layout to ensure transition triggers
-          cursor.getBoundingClientRect();
-        }
-        // Ensure mouse shape
-        cursor.style.width = '20px';
-        cursor.style.height = '20px';
-        cursor.style.borderRadius = '50%';
-        cursor.style.boxShadow =
-          '0 0 10px 2px rgba(0, 102, 255, 0.8), inset 0 0 5px rgba(0, 102, 255, 0.5)';
-        
-        cursor.style.opacity = '1';
-        cursor.style.left = `${x}px`;
-        cursor.style.top = `${y}px`;
-        cursor.style.transform = 'translate(-50%, -50%) scale(1)';
-        cursor.style.backgroundColor = 'rgba(0, 102, 255, 0.3)';
-      },
-      { x, y },
-    );
-    // Wait for the movement animation to visually complete before performing action
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-
-  private async showScrollIndicator(page: any, direction: string): Promise<void> { // eslint-disable-line @typescript-eslint/no-explicit-any
-    await page.evaluate((dir: string) => {
-      let cursor = document.getElementById('gemini-cursor');
-      if (!cursor) {
-        cursor = document.createElement('div');
-        cursor.id = 'gemini-cursor';
-        cursor.style.position = 'fixed';
-        cursor.style.zIndex = '2147483648';
-        cursor.style.pointerEvents = 'none';
-        cursor.style.transition =
-          'top 0.2s ease-out, left 0.2s ease-out, opacity 0.2s ease-in-out, transform 0.1s ease-in-out, background-color 0.1s ease-in-out, width 0.2s, height 0.2s, border-radius 0.2s';
-        cursor.style.transform = 'translate(-50%, -50%)';
-        document.body.appendChild(cursor);
-      }
-      
-      // Scroll indicator shape
-      cursor.style.width = '20px';
-      cursor.style.height = '30px';
-      cursor.style.borderRadius = '8px';
-      cursor.style.left = '50vw';
-      cursor.style.top = '50vh';
-      cursor.style.opacity = '1';
-      cursor.style.transform = 'translate(-50%, -50%)';
-      
-      const blue = 'rgba(0, 102, 255, 1)';
-      const transparentBlue = 'rgba(0, 102, 255, 0.2)';
-      
-      if (dir === 'up') {
-         cursor.style.background = `linear-gradient(to top, ${transparentBlue}, ${blue})`;
-         cursor.style.boxShadow = `0 -5px 10px ${transparentBlue}`;
-      } else if (dir === 'down') {
-         cursor.style.background = `linear-gradient(to bottom, ${transparentBlue}, ${blue})`;
-         cursor.style.boxShadow = `0 5px 10px ${transparentBlue}`;
-      } else {
-         cursor.style.background = transparentBlue;
-         cursor.style.boxShadow = `0 0 10px ${transparentBlue}`;
-      }
-
-      // Animate movement slightly
-      setTimeout(() => {
-         const offset = dir === 'up' ? -20 : (dir === 'down' ? 20 : 0);
-         cursor.style.transform = `translate(-50%, calc(-50% + ${offset}px))`;
-         cursor.style.opacity = '0';
-      }, 300);
-    }, direction);
-    // Wait for visual effect
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async animateClick(page: any): Promise<void> {
-    await page.evaluate(() => {
-      const cursor = document.getElementById('gemini-cursor');
-      if (cursor) {
-        // Visual click down - larger and darker
-        cursor.style.transform = 'translate(-50%, -50%) scale(1.2)';
-        cursor.style.backgroundColor = 'rgba(0, 102, 255, 1)'; // Solid blue
-        cursor.style.boxShadow =
-          '0 0 15px 4px rgba(0, 102, 255, 1), inset 0 0 5px rgba(255, 255, 255, 0.5)';
-        setTimeout(() => {
-          // Release and fade out
-          cursor.style.transform = 'translate(-50%, -50%) scale(1)';
-          cursor.style.backgroundColor = 'rgba(0, 102, 255, 0.3)';
-          cursor.style.boxShadow =
-            '0 0 10px 2px rgba(0, 102, 255, 0.8), inset 0 0 5px rgba(0, 102, 255, 0.5)';
-          cursor.style.opacity = '0';
-        }, 150);
-      }
-    });
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-
-  async navigate(url: string): Promise<ToolResult> {
-    const page = await browserManager.getPage();
-    await this.showOverlay(page, `Navigating to ${url}`);
-    await page.goto(url);
-    return { output: `Navigated to ${url}`, url: page.url() };
-  }
-
-  private async getViewportSize(page: any): Promise<{ width: number; height: number } | null> { // eslint-disable-line @typescript-eslint/no-explicit-any
-    const viewport = page.viewportSize();
-    if (viewport) {
-      return viewport;
-    }
-    return page.evaluate(() => ({
-      width: window.innerWidth,
-      height: window.innerHeight,
-    }));
-  }
-
-  private async getElementLabel(page: any, x: number, y: number): Promise<string | null> { // eslint-disable-line @typescript-eslint/no-explicit-any
-    return page.evaluate(({ x, y }: { x: number; y: number }) => {
-      const el = document.elementFromPoint(x, y);
-      if (!el) return null;
-      const text =
-        (el as HTMLElement).innerText?.trim() ||
-        el.getAttribute('aria-label') ||
-        el.getAttribute('placeholder') ||
-        el.getAttribute('title') ||
-        el.getAttribute('alt');
-      if (text) {
-        return text.slice(0, 30) + (text.length > 30 ? '...' : '');
-      }
-      return el.tagName.toLowerCase();
-    }, { x, y });
   }
 
   async clickAt(x: number, y: number): Promise<ToolResult> {
-    const page = await browserManager.getPage();
-    const viewport = await this.getViewportSize(page);
-    if (viewport) {
+    await this.showOverlay(`Clicking at ${x}, ${y}`);
+    const page = await this.browserManager.getPage();
+    try {
+      // Model sends coordinates in 0-1000 range, scale to viewport
+      const viewport = page.viewportSize();
+      if (!viewport) {
+        return { error: 'Viewport not available' };
+      }
       const actualX = (x / 1000) * viewport.width;
       const actualY = (y / 1000) * viewport.height;
-
-      await this.moveMouse(page, actualX, actualY);
-
-      const label = await this.getElementLabel(page, actualX, actualY);
-      const msg = label ? `Clicking "${label}"` : `Clicking at ${x}, ${y}`;
-      await this.showOverlay(page, msg);
-
       await page.mouse.click(actualX, actualY);
-      await this.animateClick(page);
-      // Wait for visual effect to finish/be seen before returning
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      return { output: 'Clicked', url: page.url() };
+      return {
+        output: `Clicked at ${x}, ${y} (scaled to ${actualX.toFixed(0)}, ${actualY.toFixed(0)})`,
+      };
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { error: `Failed to click at ${x}, ${y}: ${message}` };
     }
-    return { error: 'Viewport not available', url: page.url() };
   }
 
   async typeTextAt(
@@ -302,75 +175,31 @@ export class BrowserTools {
     pressEnter: boolean = false,
     clearBeforeTyping: boolean = false,
   ): Promise<ToolResult> {
-    const page = await browserManager.getPage();
-    const viewport = await this.getViewportSize(page);
-    if (viewport) {
-      const actualX = (x / 1000) * viewport.width;
-      const actualY = (y / 1000) * viewport.height;
+    const page = await this.browserManager.getPage();
+    try {
+      // Click to focus
+      await this.clickAt(x, y);
 
-      await this.moveMouse(page, actualX, actualY);
-
-      const label = await this.getElementLabel(page, actualX, actualY);
-      const msg = label
-        ? `Typing "${text}" into ${label}`
-        : `Typing "${text}" at ${x}, ${y}`;
-      await this.showOverlay(page, msg);
-
-      await page.mouse.click(actualX, actualY);
-      await this.animateClick(page); // Click to focus
-
+      // Clear if requested (naive approach: select all + backspace)
       if (clearBeforeTyping) {
-        // Select all text using keyboard shortcut and delete it
-        // Note: 'Control' is commonly used on Linux/Windows. For Mac, 'Meta' might be needed
-        // but 'Control' is often safer as a default for browser contexts in some envs.
-        // However, Playwright usually handles 'Control' vs 'Meta' if we use 'ControlOrMeta'.
-        // But let's stick to 'Control+A' and 'Backspace' for standard clearing behavior.
+        // MacOS: Meta+A, Windows/Linux: Control+A
+        // Playwright handles 'Control' or 'Meta' depending on platform usually,
+        // but we can just send both or check platform.
+        // Safer: click 3 times to select line? Or Ctrl+A.
         await page.keyboard.press('Control+A');
         await page.keyboard.press('Backspace');
       }
 
       await page.keyboard.type(text);
+
       if (pressEnter) {
         await page.keyboard.press('Enter');
       }
-      // Wait for visual effect to finish/be seen before returning
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      return { output: `Typed "${text}"`, url: page.url() };
+      return { output: `Typed "${text}" at ${x}, ${y}` };
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { error: `Failed to type at ${x}, ${y}: ${message}` };
     }
-    return { error: 'Viewport not available', url: page.url() };
-  }
-
-  async scrollDocument(
-    direction: 'up' | 'down' | 'left' | 'right',
-    amount: number = 500,
-  ): Promise<ToolResult> {
-    const page = await browserManager.getPage();
-    await this.showScrollIndicator(page, direction);
-    await this.showOverlay(page, `Scrolling ${direction}`);
-    let deltaX = 0;
-    let deltaY = 0;
-    
-    if (direction === 'up') deltaY = -amount;
-    if (direction === 'down') deltaY = amount;
-    if (direction === 'left') deltaX = -amount;
-    if (direction === 'right') deltaX = amount;
-
-    // Smooth scroll implementation
-    const steps = 10;
-    const stepDelay = 30; // ms
-    const stepX = deltaX / steps;
-    const stepY = deltaY / steps;
-
-    for (let i = 0; i < steps; i++) {
-      await page.mouse.wheel(stepX, stepY);
-      // Small delay between steps to create smooth effect
-      await new Promise((resolve) => setTimeout(resolve, stepDelay));
-    }
-
-    // Wait a bit more for any inertial scrolling or rendering to settle
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
-    return { output: `Scrolled ${direction} by ${amount}`, url: page.url() };
   }
 
   async dragAndDrop(
@@ -379,59 +208,155 @@ export class BrowserTools {
     destX: number,
     destY: number,
   ): Promise<ToolResult> {
-    const page = await browserManager.getPage();
-    await this.showOverlay(page, `Dragging from ${x},${y} to ${destX},${destY}`);
-    const viewport = await this.getViewportSize(page);
-    if (viewport) {
+    const page = await this.browserManager.getPage();
+    try {
+      // Model sends coordinates in 0-1000 range, scale to viewport
+      const viewport = page.viewportSize();
+      if (!viewport) {
+        return { error: 'Viewport not available' };
+      }
       const actualX = (x / 1000) * viewport.width;
       const actualY = (y / 1000) * viewport.height;
       const actualDestX = (destX / 1000) * viewport.width;
       const actualDestY = (destY / 1000) * viewport.height;
 
-      await this.moveMouse(page, actualX, actualY);
       await page.mouse.move(actualX, actualY);
-      await this.animateClick(page); // Visual down
       await page.mouse.down();
-      
-      // Animate move to dest? 
-      // For now, just jump cursor to dest before releasing?
-      // Or show it at dest.
-      await this.moveMouse(page, actualDestX, actualDestY);
-      
-      await page.mouse.move(actualDestX, actualDestY);
+      await page.mouse.move(actualDestX, actualDestY, { steps: 5 });
       await page.mouse.up();
-      await this.animateClick(page); // Visual release? Or fade out
-      
-      return { output: `Dragged from ${x},${y} to ${destX},${destY}`, url: page.url() };
+      return { output: `Dragged from ${x},${y} to ${destX},${destY}` };
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { error: `Failed to drag: ${message}` };
     }
-    return { error: 'Viewport not available', url: page.url() };
   }
 
-  async pagedown(): Promise<ToolResult> {
-    const page = await browserManager.getPage();
-    await this.showOverlay(page, 'Pressing PageDown');
-    await page.keyboard.press('PageDown');
-    return { output: 'Pressed PageDown', url: page.url() };
-  }
-
-  async pageup(): Promise<ToolResult> {
-    const page = await browserManager.getPage();
-    await this.showOverlay(page, 'Pressing PageUp');
-    await page.keyboard.press('PageUp');
-    return { output: 'Pressed PageUp', url: page.url() };
-  }
-
-  async keyCombination(keys: string): Promise<ToolResult> {
-    const page = await browserManager.getPage();
-    await this.showOverlay(page, `Pressing ${keys}`);
-    await page.keyboard.press(keys);
-    return { output: `Pressed ${keys}`, url: page.url() };
+  // Make sure we expose viewport size helper if needed by Agent
+  async getViewportSize(): Promise<{ width: number; height: number } | null> {
+    const page = await this.browserManager.getPage();
+    return page.viewportSize();
   }
 
   async openWebBrowser(): Promise<ToolResult> {
-    const page = await browserManager.getPage();
-    return { output: 'Browser opened', url: page.url() };
+    await this.browserManager.getMcpClient();
+    return { output: 'Browser opened' };
+  }
+
+  async scrollDocument(
+    direction: 'up' | 'down' | 'left' | 'right',
+    amount: number,
+  ): Promise<ToolResult> {
+    const page = await this.browserManager.getPage();
+    let x = 0;
+    let y = 0;
+    switch (direction) {
+      case 'up':
+        y = -amount;
+        break;
+      case 'down':
+        y = amount;
+        break;
+      case 'left':
+        x = -amount;
+        break;
+      case 'right':
+        x = amount;
+        break;
+      default:
+        break;
+    }
+
+    // Use mouse wheel to scroll, which works on scrollable containers (divs)
+    // unlike window.scrollBy which only works on the main document.
+    // Move mouse to center first to ensure we scroll the main content.
+    const viewport = page.viewportSize();
+    if (viewport) {
+      await page.mouse.move(viewport.width / 2, viewport.height / 2);
+    }
+    await page.mouse.wheel(x, y);
+
+    return { output: `Scrolled ${direction} by ${amount}` };
+  }
+
+  async pagedown(): Promise<ToolResult> {
+    const page = await this.browserManager.getPage();
+    await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+    return { output: 'Paged down' };
+  }
+
+  async pageup(): Promise<ToolResult> {
+    const page = await this.browserManager.getPage();
+    await page.evaluate(() => window.scrollBy(0, -window.innerHeight));
+    return { output: 'Paged up' };
+  }
+
+  async takeSnapshot(verbose: boolean = false): Promise<ToolResult> {
+    const client = await this.browserManager.getMcpClient();
+    const result = await client.callTool('take_snapshot', { verbose });
+
+    // Handle standard MCP result content
+    const content = result.content;
+    let output = '';
+    if (content && Array.isArray(content)) {
+      output = content
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .filter((item: any) => item.type === 'text')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((item: any) => item.text)
+        .join('');
+    }
+    return { output };
+  }
+
+  async waitFor(text: string): Promise<ToolResult> {
+    const client = await this.browserManager.getMcpClient();
+    await client.callTool('wait_for', { text });
+    return { output: `Waited for text "${text}"` };
+  }
+
+  async handleDialog(
+    action: 'accept' | 'dismiss',
+    promptText?: string,
+  ): Promise<ToolResult> {
+    const client = await this.browserManager.getMcpClient();
+    await client.callTool('handle_dialog', { action, promptText });
+    return { output: `Dialog ${action}ed` };
+  }
+
+  async evaluateScript(script: string): Promise<ToolResult> {
+    const page = await this.browserManager.getPage();
+    try {
+      // Wrap script in a function call to handle both expressions and statements
+      const wrappedScript = `(function() { return ${script}; })()`;
+      const result = await page.evaluate(wrappedScript);
+
+      let output = '';
+      if (typeof result === 'object') {
+        output = JSON.stringify(result);
+      } else {
+        output = String(result);
+      }
+      return { output };
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { error: `Script execution failed: ${message}` };
+    }
+  }
+
+  async pressKey(key: string): Promise<ToolResult> {
+    const client = await this.browserManager.getMcpClient();
+    await client.callTool('press_key', { key });
+    return { output: `Pressed key "${key}"` };
+  }
+
+  async drag(fromUid: string, toUid: string): Promise<ToolResult> {
+    const client = await this.browserManager.getMcpClient();
+    await client.callTool('drag', { from_uid: fromUid, to_uid: toUid });
+    return { output: 'Dragged element' };
+  }
+
+  // Deprecated: Use pressKey if possible, but keeping for coordinate-based/legacy support or where UID isn't known
+  async keyCombination(keys: string): Promise<ToolResult> {
+    return this.pressKey(keys);
   }
 }
-
-export const browserTools = new BrowserTools();

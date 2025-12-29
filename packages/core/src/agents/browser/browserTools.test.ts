@@ -6,124 +6,128 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { BrowserTools } from './browserTools.js';
-import { browserManager } from './browserManager.js';
-
-// Mock BrowserManager
-vi.mock('./browserManager.js', () => ({
-  browserManager: {
-    getPage: vi.fn(),
-  },
-}));
+import type { BrowserManager } from './browserManager.js';
+import type { McpClient } from '../../tools/mcp-client.js';
 
 describe('BrowserTools', () => {
   let browserTools: BrowserTools;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mockPage: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mockMouse: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mockKeyboard: any;
+  let mockBrowserManager: BrowserManager;
+  let mockMcpClient: McpClient;
+  let mockPage: {
+    goto: ReturnType<typeof vi.fn>;
+    click: ReturnType<typeof vi.fn>;
+    fill: ReturnType<typeof vi.fn>;
+    evaluate: ReturnType<typeof vi.fn>;
+    viewportSize: ReturnType<typeof vi.fn>;
+    mouse: {
+      click: ReturnType<typeof vi.fn>;
+      move: ReturnType<typeof vi.fn>;
+      down: ReturnType<typeof vi.fn>;
+      up: ReturnType<typeof vi.fn>;
+      wheel: ReturnType<typeof vi.fn>;
+    };
+    keyboard: {
+      type: ReturnType<typeof vi.fn>;
+      press: ReturnType<typeof vi.fn>;
+    };
+  };
 
   beforeEach(() => {
-    browserTools = new BrowserTools();
-
-    mockMouse = {
-      click: vi.fn(),
-      wheel: vi.fn(),
-    };
-    mockKeyboard = {
-      type: vi.fn(),
-      press: vi.fn(),
-    };
     mockPage = {
-      goto: vi.fn(),
-      url: vi.fn().mockReturnValue('https://example.com'),
-      viewportSize: vi.fn().mockReturnValue(null),
-      evaluate: vi.fn().mockResolvedValue({ width: 1000, height: 1000 }),
-      mouse: mockMouse,
-      keyboard: mockKeyboard,
+      goto: vi.fn().mockResolvedValue(undefined),
+      click: vi.fn().mockResolvedValue(undefined),
+      fill: vi.fn().mockResolvedValue(undefined),
+      evaluate: vi.fn().mockResolvedValue(undefined),
+      viewportSize: vi.fn().mockReturnValue({ width: 1024, height: 768 }),
+      mouse: {
+        click: vi.fn().mockResolvedValue(undefined),
+        move: vi.fn().mockResolvedValue(undefined),
+        down: vi.fn().mockResolvedValue(undefined),
+        up: vi.fn().mockResolvedValue(undefined),
+        wheel: vi.fn().mockResolvedValue(undefined),
+      },
+      keyboard: {
+        type: vi.fn().mockResolvedValue(undefined),
+        press: vi.fn().mockResolvedValue(undefined),
+      },
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (browserManager.getPage as any).mockResolvedValue(mockPage);
+    mockMcpClient = {
+      callTool: vi.fn().mockResolvedValue({
+        content: [{ type: 'text', text: 'ok' }],
+      }),
+    } as unknown as McpClient;
+
+    mockBrowserManager = {
+      getMcpClient: vi.fn().mockResolvedValue(mockMcpClient),
+      getPage: vi.fn().mockResolvedValue(mockPage),
+    } as unknown as BrowserManager;
+
+    browserTools = new BrowserTools(mockBrowserManager);
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it('navigate should go to the specified URL', async () => {
-    const result = await browserTools.navigate('https://google.com');
-
-    expect(mockPage.goto).toHaveBeenCalledWith('https://google.com');
-    expect(result).toEqual({
-      output: 'Navigated to https://google.com',
-      url: 'https://example.com',
-    });
-  });
-
-  it('click_at should click at scaled coordinates', async () => {
-    // x=500 (50%), y=500 (50%) of 1024x768 viewport -> 512, 384
+  it('clickAt should scale coordinates and use page.mouse.click', async () => {
+    // Viewport is 1024x768, x=500 -> (500/1000)*1024 = 512, y=500 -> (500/1000)*768 = 384
     const result = await browserTools.clickAt(500, 500);
 
-    // Should call evaluate for: showCursor, getElementLabel, showOverlay, animateClick (and getViewportSize if needed)
-    expect(mockPage.evaluate).toHaveBeenCalledTimes(5); 
-    expect(mockMouse.click).toHaveBeenCalledWith(500, 500);
-    expect(result).toEqual({ output: 'Clicked', url: 'https://example.com' });
+    expect(mockPage.mouse.click).toHaveBeenCalledWith(512, 384);
+    expect(result.output).toContain('Clicked at 500, 500');
   });
 
-  it('type_text_at should click and type', async () => {
-    const result = await browserTools.typeTextAt(500, 500, 'hello', true);
+  it('typeTextAt should click then type', async () => {
+    // x=500, y=500 -> scaled as above
+    await browserTools.typeTextAt(500, 500, 'hello', false, false);
 
-    expect(mockMouse.click).toHaveBeenCalledWith(500, 500);
-    expect(mockKeyboard.type).toHaveBeenCalledWith('hello');
-    expect(mockKeyboard.press).toHaveBeenCalledWith('Enter');
-    expect(result).toEqual({
-      output: 'Typed "hello"',
-      url: 'https://example.com',
-    });
+    // Click should be called for focus
+    expect(mockPage.mouse.click).toHaveBeenCalled();
+    // Then type
+    expect(mockPage.keyboard.type).toHaveBeenCalledWith('hello');
   });
 
-  it('scroll_document should scroll the page', async () => {
-    await browserTools.scrollDocument('down', 100);
-    expect(mockPage.evaluate).toHaveBeenCalledTimes(2);
-    expect(mockMouse.wheel).toHaveBeenCalledWith(0, 100);
+  it('scrollDocument should call page.mouse.wheel', async () => {
+    // Mock viewport for centering
+    mockPage.viewportSize.mockReturnValue({ width: 1000, height: 1000 });
 
-    await browserTools.scrollDocument('up', 100);
-    expect(mockMouse.wheel).toHaveBeenCalledWith(0, -100);
+    const result = await browserTools.scrollDocument('down', 100);
+
+    // Should move to center
+    expect(mockPage.mouse.move).toHaveBeenCalledWith(500, 500);
+    // Should scroll
+    expect(mockPage.mouse.wheel).toHaveBeenCalledWith(0, 100);
+    expect(result).toEqual({ output: 'Scrolled down by 100' });
   });
 
-  it('drag_and_drop should perform drag sequence', async () => {
-    mockMouse.move = vi.fn();
-    mockMouse.down = vi.fn();
-    mockMouse.up = vi.fn();
+  it('dragAndDrop should scale coordinates and use mouse methods', async () => {
+    // x=100, y=100 -> (100/1000)*1024 = 102.4, (100/1000)*768 = 76.8
+    // destX=900, destY=900 -> (900/1000)*1024 = 921.6, (900/1000)*768 = 691.2
+    await browserTools.dragAndDrop(100, 100, 900, 900);
 
-    // 0,0 to 500,500 (scaled from 0,0 -> 500,500 on 1000x1000 viewport)
-    await browserTools.dragAndDrop(0, 0, 500, 500);
-
-    expect(mockMouse.move).toHaveBeenNthCalledWith(1, 0, 0);
-    expect(mockMouse.down).toHaveBeenCalled();
-    expect(mockMouse.move).toHaveBeenNthCalledWith(2, 500, 500);
-    expect(mockMouse.up).toHaveBeenCalled();
+    expect(mockPage.mouse.move).toHaveBeenNthCalledWith(
+      1,
+      expect.closeTo(102.4, 1),
+      expect.closeTo(76.8, 1),
+    );
+    expect(mockPage.mouse.down).toHaveBeenCalled();
+    expect(mockPage.mouse.move).toHaveBeenNthCalledWith(
+      2,
+      expect.closeTo(921.6, 1),
+      expect.closeTo(691.2, 1),
+      { steps: 5 },
+    );
+    expect(mockPage.mouse.up).toHaveBeenCalled();
   });
 
-  it('pagedown/pageup should press keys', async () => {
-    await browserTools.pagedown();
-    expect(mockKeyboard.press).toHaveBeenCalledWith('PageDown');
+  it('evaluateScript should wrap script in function and execute', async () => {
+    mockPage.evaluate.mockResolvedValue('test result');
+    const result = await browserTools.evaluateScript('document.title');
 
-    await browserTools.pageup();
-    expect(mockKeyboard.press).toHaveBeenCalledWith('PageUp');
-  });
-
-  it('removeOverlay should evaluate script', async () => {
-    mockPage.evaluate = vi.fn();
-    await browserTools.removeOverlay();
-    expect(mockPage.evaluate).toHaveBeenCalled();
-  });
-
-  it('updateBorderOverlay should evaluate script', async () => {
-    mockPage.evaluate = vi.fn();
-    await browserTools.updateBorderOverlay({ active: true, capturing: false });
-    expect(mockPage.evaluate).toHaveBeenCalled();
+    expect(mockPage.evaluate).toHaveBeenCalledWith(
+      expect.stringContaining('document.title'),
+    );
+    expect(result.output).toBe('test result');
   });
 });

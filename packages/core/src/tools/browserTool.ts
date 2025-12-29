@@ -31,17 +31,29 @@ class BrowserToolInvocation extends BaseToolInvocation<
   }
 
   async execute(
-    _signal: AbortSignal,
+    signal: AbortSignal,
     updateOutput?: (output: string) => void,
   ): Promise<ToolResult> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const generator = (this.client as any).getContentGeneratorOrFail();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tempDir = (this.client as any).config.storage.getProjectTempDir();
-    const agent = new BrowserAgent(generator, tempDir);
+    const generator = this.client.getContentGeneratorOrFail();
+    const config = this.client.getConfig();
+
+    if (config.browserAgentSettings?.enabled === false) {
+      return {
+        llmContent: [{ text: 'Error: Browser Agent is disabled in settings.' }],
+        returnDisplay: 'Error: Browser Agent is disabled in settings.',
+        error: { message: 'Browser Agent is disabled in settings.' },
+      };
+    }
+
+    const tempDir = config.storage.getProjectTempDir();
+    const agent = new BrowserAgent(generator, config, tempDir);
 
     try {
-      const result = await agent.runTask(this.params.task, updateOutput);
+      const result = await agent.runTask(
+        this.params.task,
+        signal,
+        updateOutput,
+      );
       return {
         llmContent: [{ text: result || 'Task completed' }],
         returnDisplay: result || 'Task completed',

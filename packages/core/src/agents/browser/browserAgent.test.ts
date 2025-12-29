@@ -4,161 +4,163 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  type Mock,
+} from 'vitest';
 import { BrowserAgent } from './browserAgent.js';
-import { browserTools } from './browserTools.js';
-import { browserManager } from './browserManager.js';
+import type { Config } from '../../config/config.js';
+import type { ContentGenerator } from '../../core/contentGenerator.js';
+import type { BrowserManager } from './browserManager.js';
 
-// Mock BrowserManager and BrowserTools
-vi.mock('./browserManager.js', () => ({
-  browserManager: {
-    getPage: vi.fn(),
+import type { McpClient } from '../../tools/mcp-client.js';
+
+vi.mock('../../utils/debugLogger.js', () => ({
+  debugLogger: {
+    log: vi.fn(),
   },
 }));
 
+// Mock BrowserManager and BrowserTools classes (not instances, but the module exports if needed)
+// Mock BrowserManager and BrowserTools classes (not instances, but the module exports if needed)
+// But BrowserAgent instantiates them. We should mock the modules so the constructor returns mocks.
+vi.mock('./browserManager.js', () => ({
+  BrowserManager: vi.fn().mockImplementation(() => ({
+    getMcpClient: vi.fn(),
+    ensureConnection: vi.fn(),
+    close: vi.fn(),
+  })),
+}));
+
 vi.mock('./browserTools.js', () => ({
-  browserTools: {
-    navigate: vi.fn(),
-    clickAt: vi.fn(),
-    typeTextAt: vi.fn(),
-    scrollDocument: vi.fn(),
-    dragAndDrop: vi.fn(),
-    pagedown: vi.fn(),
-    pageup: vi.fn(),
-    keyCombination: vi.fn(),
+  BrowserTools: vi.fn().mockImplementation(() => ({
+    showOverlay: vi.fn(),
     removeOverlay: vi.fn(),
     updateBorderOverlay: vi.fn(),
-  },
+    navigate: vi.fn(),
+    // Add other methods as needed by runTask logic
+  })),
+}));
+
+// Mock GeminiChat
+const mockSendMessageStream = vi.fn();
+const mockGetHistory = vi.fn().mockReturnValue([]);
+
+vi.mock('../../core/geminiChat.js', () => ({
+  GeminiChat: vi.fn().mockImplementation(() => ({
+    sendMessageStream: mockSendMessageStream,
+    getHistory: mockGetHistory,
+  })),
+  StreamEventType: { CHUNK: 'chunk' },
 }));
 
 describe('BrowserAgent', () => {
   let browserAgent: BrowserAgent;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mockClient: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mockPage: any;
+  let mockGenerator: ContentGenerator;
+  let mockConfig: Config;
+  // Access mocked instances
+  let mockBrowserManagerInstance: BrowserManager;
+  let mockMcpClient: McpClient;
 
-  beforeEach(() => {
-    // Mock GeminiClient
-    mockClient = {
+  beforeEach(async () => {
+    mockConfig = {
+      getActiveModel: vi.fn().mockReturnValue('gemini-2.0-flash-exp'),
+      browserAgentSettings: { model: 'gemini-2.0-flash-exp' },
+    } as unknown as Config;
+
+    mockGenerator = {
       generateContent: vi.fn(),
-    };
+    } as unknown as ContentGenerator;
 
-    browserAgent = new BrowserAgent(mockClient);
+    mockMcpClient = {
+      callTool: vi.fn().mockResolvedValue({ content: [] }),
+    } as unknown as McpClient;
 
-    mockPage = {
-      screenshot: vi.fn().mockResolvedValue(Buffer.from('fake-screenshot')),
-      accessibility: {
-        snapshot: vi.fn().mockResolvedValue({ name: 'Root' }),
-      },
-    };
+    // Instantiate agent
+    browserAgent = new BrowserAgent(mockGenerator, mockConfig);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (browserManager.getPage as any).mockResolvedValue(mockPage);
+    // Retrieve the mocked instances created by the constructor
+    mockBrowserManagerInstance = (
+      browserAgent as unknown as { browserManager: BrowserManager }
+    ).browserManager;
+
+    // Setup default behavior
+    (mockBrowserManagerInstance.getMcpClient as Mock).mockResolvedValue(
+      mockMcpClient,
+    );
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it('should execute a simple task', async () => {
-    // Mock model response: Call 'navigate' tool
-    mockClient.generateContent
-      .mockResolvedValueOnce({
-        candidates: [
-          {
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    name: 'navigate',
-                    args: { url: 'https://example.com' },
-                  },
-                },
-              ],
+  it('should run task and call tools using streaming', async () => {
+    // Mock streaming response: Call 'navigate'
+    const mockStream = (async function* () {
+      yield {
+        type: 'chunk',
+        value: {
+          functionCalls: [
+            {
+              name: 'navigate',
+              args: { url: 'https://example.com' },
             },
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        candidates: [
-          {
-            content: {
-              parts: [{ text: 'Done' }],
+          ],
+          candidates: [
+            {
+              content: {
+                parts: [{ text: 'Okay, navigating.' }],
+              },
             },
-          },
-        ],
-      });
+          ],
+        },
+      };
+    })();
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (browserTools.navigate as any).mockResolvedValue({ output: 'Navigated' });
+    mockSendMessageStream.mockReturnValue(mockStream);
 
-    await browserAgent.runTask('Go to example.com');
+    // Mock tool result
+    // Navigate is now direct MCP call, mocked at client level
 
-    expect(browserTools.navigate).toHaveBeenCalledWith('https://example.com');
+    await browserAgent.runTask(
+      'Go to example.com',
+      new AbortController().signal,
+    );
+
+    expect(mockBrowserManagerInstance.ensureConnection).toHaveBeenCalled();
+    expect(mockMcpClient.callTool).toHaveBeenCalledWith('navigate_page', {
+      url: 'https://example.com',
+    });
   });
 
-  it('should log descriptive messages for tools', async () => {
-    // Mock model responses for a sequence of tool calls
-    mockClient.generateContent
-      .mockResolvedValueOnce({
-        candidates: [
-          {
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    name: 'navigate',
-                    args: { url: 'https://google.com' },
-                  },
-                },
-              ],
-            },
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        candidates: [
-          {
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    name: 'type_text_at',
-                    args: { x: 100, y: 200, text: 'hello' },
-                  },
-                },
-              ],
-            },
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        candidates: [
-          {
-            content: {
-              parts: [{ text: 'Done' }],
-            },
-          },
-        ],
-      });
+  it('should captures DOM snapshot but NOT screenshot by default', async () => {
+    // Mock streaming response (done)
+    const mockStream = (async function* () {
+      yield {
+        type: 'chunk',
+        value: {
+          candidates: [{ content: { parts: [{ text: 'Done' }] } }],
+        },
+      };
+    })();
+    mockSendMessageStream.mockReturnValue(mockStream);
 
-    // Mock tool implementations
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (browserTools.navigate as any).mockResolvedValue({ output: 'Navigated' });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (browserTools.typeTextAt as any).mockResolvedValue({ output: 'Typed' });
+    await browserAgent.runTask('Check page', new AbortController().signal);
 
-    const logSpy = vi.fn();
-    await browserAgent.runTask('Do something', logSpy);
+    // Should call take_snapshot (DOM)
+    expect(mockMcpClient.callTool).toHaveBeenCalledWith('take_snapshot', {
+      verbose: false,
+    });
 
-    expect(logSpy).toHaveBeenCalledTimes(4);
-    expect(logSpy).toHaveBeenNthCalledWith(
-      1,
-      'Navigating to https://google.com',
+    // Should NOT call take_screenshot (unless fallback fallback logic was triggered, but we shouldn't see it if we don't delegate)
+    expect(mockMcpClient.callTool).not.toHaveBeenCalledWith(
+      'take_screenshot',
+      expect.anything(),
     );
-    // Call 2 is the result log
-    expect(logSpy).toHaveBeenNthCalledWith(3, 'Typing "hello" at 100, 200');
-    // Call 4 is the result log
   });
 });

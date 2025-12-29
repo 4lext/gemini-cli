@@ -12,14 +12,16 @@ using the `gemini-2.5-computer-use-preview-10-2025` model.
 
 ## Architecture
 
-- **`BrowserManager`:** Wraps Playwright to manage the browser instance.
-  Currently launches in **headed** mode for visibility and safety.
+- **`BrowserManager`:** Manages the connection to the Chrome browser via the
+  Model Context Protocol (MCP) using the `chrome-devtools-mcp` server. It
+  expects a running Chrome instance or attempts to connect to one.
 - **`BrowserTools`:** Defines the low-level actions available to the model
-  (`navigate`, `click_at`, etc.).
+  (`navigate`, `click_at`, etc.), translating them into MCP tool calls (e.g.,
+  `evaluate_script`, `navigate_page`).
 - **`BrowserAgent`:** Implements the agent loop. It overrides the standard
   `GeminiClient` model to use the specialized Computer Use model. It handles the
-  turn-taking loop, capturing state (screenshots/DOM) after every tool execution
-  and feeding it back to the model.
+  turn-taking loop, capturing state (screenshots) after every tool execution and
+  feeding it back to the model.
 
 * **`BrowserTool`:** The entry point for the main Gemini CLI agent. It exposes a
   `computer_use_browser` tool that the main agent can call to delegate a task to
@@ -28,13 +30,12 @@ using the `gemini-2.5-computer-use-preview-10-2025` model.
 
 ## Security
 
-- **Headed Mode:** The browser is launched in headed mode so the user can
-  observe all actions.
+- **Headed Mode:** The agent interacts with a real Chrome browser instance, so
+  the user can observe all actions.
 - **Safety Loop:** The agent loop runs for a maximum of 20 turns to prevent
   infinite loops.
-- **Sandboxing:** Playwright is run with `--no-sandbox` and
-  `--disable-setuid-sandbox` currently, which is standard for CI/docker
-  environments but should be reviewed for local security.
+- **MCP Security:** Interaction is mediated through the MCP server, which
+  provides an abstraction layer over raw DevTools protocol commands.
 
 ## Usage
 
