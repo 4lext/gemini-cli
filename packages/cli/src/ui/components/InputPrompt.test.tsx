@@ -22,7 +22,15 @@ import { ApprovalMode, debugLogger } from '@google/gemini-cli-core';
 import * as path from 'node:path';
 import type { CommandContext, SlashCommand } from '../commands/types.js';
 import { CommandKind } from '../commands/types.js';
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  vi,
+  afterEach,
+  type MockInstance,
+} from 'vitest';
 import type { UseShellHistoryReturn } from '../hooks/useShellHistory.js';
 import { useShellHistory } from '../hooks/useShellHistory.js';
 import type { UseCommandCompletionReturn } from '../hooks/useCommandCompletion.js';
@@ -39,6 +47,7 @@ import { createMockCommandContext } from '../../test-utils/mockCommandContext.js
 import stripAnsi from 'strip-ansi';
 import chalk from 'chalk';
 import { StreamingState } from '../types.js';
+import { appEvents, AppEvent } from '../../utils/events.js';
 
 vi.mock('../hooks/useShellHistory.js');
 vi.mock('../hooks/useCommandCompletion.js');
@@ -350,12 +359,7 @@ describe('InputPrompt', () => {
     });
 
     await act(async () => {
-      stdin.write('\u001B[A'); // Up arrow
-    });
-    await waitFor(() => expect(mockInputHistory.navigateUp).toHaveBeenCalled());
-
-    await act(async () => {
-      stdin.write('\u001B[B'); // Down arrow
+      stdin.write('\u000E'); // Ctrl+N
     });
     await waitFor(() =>
       expect(mockInputHistory.navigateDown).toHaveBeenCalled(),
@@ -454,11 +458,11 @@ describe('InputPrompt', () => {
     });
 
     await act(async () => {
-      stdin.write('\u001B[A'); // Up arrow
+      stdin.write('\u0010'); // Ctrl+P
     });
     await waitFor(() => expect(mockInputHistory.navigateUp).toHaveBeenCalled());
     await act(async () => {
-      stdin.write('\u001B[B'); // Down arrow
+      stdin.write('\u000E'); // Ctrl+N
     });
     await waitFor(() =>
       expect(mockInputHistory.navigateDown).toHaveBeenCalled(),
@@ -2553,7 +2557,7 @@ describe('InputPrompt', () => {
       );
 
       await act(async () => {
-        stdin.write('\u001B[A');
+        stdin.write('\u0010'); // Ctrl+P
       });
       await waitFor(() =>
         expect(mockInputHistory.navigateUp).toHaveBeenCalled(),
@@ -2573,7 +2577,7 @@ describe('InputPrompt', () => {
       );
 
       await act(async () => {
-        stdin.write('\u001B[A');
+        stdin.write('\u0010'); // Ctrl+P
       });
       await waitFor(() => expect(mockPopAllMessages).toHaveBeenCalled());
 
@@ -2645,7 +2649,7 @@ describe('InputPrompt', () => {
       );
 
       await act(async () => {
-        stdin.write('\u001B[A');
+        stdin.write('\u0010'); // Ctrl+P
       });
       await waitFor(() =>
         expect(mockInputHistory.navigateUp).toHaveBeenCalled(),
@@ -2664,7 +2668,7 @@ describe('InputPrompt', () => {
       );
 
       await act(async () => {
-        stdin.write('\u001B[A');
+        stdin.write('\u0010'); // Ctrl+P
       });
       await waitFor(() => expect(mockPopAllMessages).toHaveBeenCalled());
 
@@ -2865,7 +2869,11 @@ describe('InputPrompt', () => {
         });
 
         await act(async () => {
-          stdin.write(key);
+          if (key === '\u001B[A') {
+            stdin.write('\u0010'); // Ctrl+P
+          } else {
+            stdin.write(key);
+          }
         });
 
         await waitFor(() => {
@@ -2912,7 +2920,7 @@ describe('InputPrompt', () => {
       });
 
       await act(async () => {
-        stdin.write('\u001B[A'); // Up arrow
+        stdin.write('\u0010'); // Ctrl+P
       });
 
       await waitFor(() => {
@@ -2936,7 +2944,7 @@ describe('InputPrompt', () => {
 
       // Navigate history (suppresses)
       await act(async () => {
-        stdin.write('\u001B[A');
+        stdin.write('\u0010'); // Ctrl+P
       });
 
       // Wait for it to be suppressed
@@ -2969,6 +2977,123 @@ describe('InputPrompt', () => {
           config: expect.anything(),
           active: true,
         });
+      });
+    });
+  });
+
+  describe('History navigation trap', () => {
+    let emitSpy: MockInstance<typeof appEvents.emit>;
+
+    beforeEach(() => {
+      emitSpy = vi.spyOn(appEvents, 'emit');
+      // Ensure the hook returns spy-able methods
+      mockedUseInputHistory.mockReturnValue(mockInputHistory);
+    });
+
+    it('traps Up arrow at top boundary and emits event', async () => {
+      mockInputHistory.navigateUp = vi.fn().mockReturnValue(false);
+
+      const { stdin } = renderWithProviders(<InputPrompt {...props} />, {
+        uiActions,
+      });
+
+      await act(async () => {
+        stdin.write('\u001B[A'); // Up arrow
+      });
+
+      await waitFor(() => {
+        expect(emitSpy).toHaveBeenCalledWith(AppEvent.HistoryUpBoundary);
+      });
+      expect(mockInputHistory.navigateUp).not.toHaveBeenCalled();
+    });
+
+    it('bypasses trap on second Up arrow press', async () => {
+      mockInputHistory.navigateUp = vi.fn().mockReturnValue(true);
+
+      const { stdin } = renderWithProviders(<InputPrompt {...props} />, {
+        uiActions,
+      });
+
+      // First press (trap)
+      await act(async () => {
+        stdin.write('\u001B[A');
+      });
+      await waitFor(() => {
+        expect(emitSpy).toHaveBeenCalledWith(AppEvent.HistoryUpBoundary);
+      });
+
+      // Brief wait to ensure React processes the state update
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Second press (bypass)
+      await act(async () => {
+        stdin.write('\u001B[A');
+      });
+      await waitFor(() => {
+        expect(mockInputHistory.navigateUp).toHaveBeenCalled();
+      });
+    });
+
+    it('bypasses trap on Ctrl+P immediately', async () => {
+      mockInputHistory.navigateUp = vi.fn().mockReturnValue(true);
+
+      const { stdin } = renderWithProviders(<InputPrompt {...props} />, {
+        uiActions,
+      });
+
+      await act(async () => {
+        stdin.write('\u0010'); // Ctrl+P
+      });
+
+      await waitFor(() => {
+        expect(mockInputHistory.navigateUp).toHaveBeenCalled();
+      });
+      expect(emitSpy).not.toHaveBeenCalledWith(AppEvent.HistoryUpBoundary);
+    });
+
+    it('traps Down arrow at bottom boundary and emits event', async () => {
+      mockInputHistory.navigateDown = vi.fn().mockReturnValue(false);
+
+      const { stdin } = renderWithProviders(<InputPrompt {...props} />, {
+        uiActions,
+      });
+
+      await act(async () => {
+        stdin.write('\u001B[B'); // Down arrow
+      });
+
+      await waitFor(() => {
+        expect(emitSpy).toHaveBeenCalledWith(AppEvent.HistoryDownBoundary);
+      });
+      expect(mockInputHistory.navigateDown).not.toHaveBeenCalled();
+    });
+
+    it('resets trap state after typing', async () => {
+      mockInputHistory.navigateUp = vi.fn().mockReturnValue(false);
+
+      const { stdin } = renderWithProviders(<InputPrompt {...props} />, {
+        uiActions,
+      });
+
+      // Trap
+      await act(async () => {
+        stdin.write('\u001B[A');
+      });
+      await waitFor(() => {
+        expect(emitSpy).toHaveBeenCalledTimes(1);
+      });
+
+      // Type something
+      await act(async () => {
+        stdin.write('a');
+      });
+
+      // Trap again
+      await act(async () => {
+        stdin.write('\u001B[A');
+      });
+      await waitFor(() => {
+        expect(emitSpy).toHaveBeenCalledTimes(2);
       });
     });
   });

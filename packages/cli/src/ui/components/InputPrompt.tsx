@@ -48,6 +48,7 @@ import { StreamingState } from '../types.js';
 import { useMouseClick } from '../hooks/useMouseClick.js';
 import { useMouse, type MouseEvent } from '../contexts/MouseContext.js';
 import { useUIActions } from '../contexts/UIActionsContext.js';
+import { appEvents, AppEvent } from '../../utils/events.js';
 
 /**
  * Returns if the terminal can be trusted to handle paste events atomically
@@ -269,7 +270,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       buffer.setText(newText, cursorPosition);
       setJustNavigatedHistory(true);
     },
-    [buffer, setJustNavigatedHistory],
+    [buffer],
   );
 
   const inputHistory = useInputHistory({
@@ -294,27 +295,23 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
     justNavigatedHistory,
     buffer.text,
     resetCompletionState,
-    setJustNavigatedHistory,
     resetReverseSearchCompletionState,
     resetCommandSearchCompletionState,
     setExpandedSuggestionIndex,
   ]);
 
   // Helper function to handle loading queued messages into input
-  // Returns true if we should continue with input history navigation
+  // Returns true if we loaded messages from the queue
   const tryLoadQueuedMessages = useCallback(() => {
     if (buffer.text.trim() === '' && popAllMessages) {
       const allMessages = popAllMessages();
       if (allMessages) {
         buffer.setText(allMessages);
-      } else {
-        // No queued messages, proceed with input history
-        inputHistory.navigateUp();
+        return true;
       }
-      return true; // We handled the up arrow key
     }
     return false;
-  }, [buffer, popAllMessages, inputHistory]);
+  }, [buffer, popAllMessages]);
 
   // Handle clipboard image pasting with Ctrl+V
   const handleClipboardPaste = useCallback(async () => {
@@ -407,9 +404,11 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
               buffer.visualCursor[0] === buffer.allVisualLines.length - 1)));
 
       // Reset completion suppression if the user performs any action other than history navigation
-      setJustNavigatedHistory((prev) =>
-        prev && !isHistoryUp && !isHistoryDown ? false : prev,
-      );
+      let wasJustNavigated = false;
+      setJustNavigatedHistory((prev) => {
+        wasJustNavigated = prev;
+        return prev && !isHistoryUp && !isHistoryDown ? false : prev;
+      });
 
       // TODO(jacobr): this special case is likely not needed anymore.
       // We should probably stop supporting paste if the InputPrompt is not
@@ -721,16 +720,28 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
         }
 
         if (isHistoryUp) {
-          // Check for queued messages first when input is empty
-          // If no queued messages, inputHistory.navigateUp() is called inside tryLoadQueuedMessages
+          const isShortcut = keyMatchers[Command.HISTORY_UP](key);
           if (tryLoadQueuedMessages()) {
             return;
           }
-          // Only navigate history if popAllMessages doesn't exist
+
+          if (!isShortcut && !wasJustNavigated) {
+            appEvents.emit(AppEvent.HistoryUpBoundary);
+            setJustNavigatedHistory(true);
+            return;
+          }
+
           inputHistory.navigateUp();
           return;
         }
         if (isHistoryDown) {
+          const isShortcut = keyMatchers[Command.HISTORY_DOWN](key);
+          if (!isShortcut && !wasJustNavigated) {
+            appEvents.emit(AppEvent.HistoryDownBoundary);
+            setJustNavigatedHistory(true);
+            return;
+          }
+
           inputHistory.navigateDown();
           return;
         }

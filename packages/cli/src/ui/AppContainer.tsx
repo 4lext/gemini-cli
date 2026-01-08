@@ -1069,11 +1069,21 @@ Logging in with Google... Restarting Gemini CLI to continue.
     const handlePasteTimeout = () => {
       handleWarning('Paste Timed out. Possibly due to slow connection.');
     };
+    const handleHistoryUpBoundary = () => {
+      handleWarning('Press Up again to navigate history, or use Ctrl+P.');
+    };
+    const handleHistoryDownBoundary = () => {
+      handleWarning('Press Down again to navigate history, or use Ctrl+N.');
+    };
     appEvents.on(AppEvent.SelectionWarning, handleSelectionWarning);
     appEvents.on(AppEvent.PasteTimeout, handlePasteTimeout);
+    appEvents.on(AppEvent.HistoryUpBoundary, handleHistoryUpBoundary);
+    appEvents.on(AppEvent.HistoryDownBoundary, handleHistoryDownBoundary);
     return () => {
       appEvents.off(AppEvent.SelectionWarning, handleSelectionWarning);
       appEvents.off(AppEvent.PasteTimeout, handlePasteTimeout);
+      appEvents.off(AppEvent.HistoryUpBoundary, handleHistoryUpBoundary);
+      appEvents.off(AppEvent.HistoryDownBoundary, handleHistoryDownBoundary);
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
