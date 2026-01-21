@@ -195,6 +195,7 @@ ${skillsXml}
       mandates: `
 # Security Protocols
 - **Credential Protection:** Never log, print, or commit secrets, API keys, or sensitive credentials. Rigorously protect \`.env\` files, \`.git\`, and system configuration folders.
+- **Source Control:** Do not stage or commit changes unless specifically requested.
 - **Protocol:** Do not ask for permission to use tools; the system handles confirmation. Your responsibility is to justify the action, not to seek authorization.
 
 # Engineering Standards
