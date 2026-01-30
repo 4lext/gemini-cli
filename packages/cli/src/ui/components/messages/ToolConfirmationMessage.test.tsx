@@ -4,17 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act } from 'react';
 import { ToolConfirmationMessage } from './ToolConfirmationMessage.js';
 import type {
   ToolCallConfirmationDetails,
   Config,
+  SerializableConfirmationDetails,
 } from '@google/gemini-cli-core';
+import { ApprovalMode, ToolConfirmationOutcome } from '@google/gemini-cli-core';
 import {
   renderWithProviders,
   createMockSettings,
 } from '../../../test-utils/render.js';
+import { waitFor } from '../../../test-utils/async.js';
 import { useToolActions } from '../../contexts/ToolActionsContext.js';
+import * as fs from 'node:fs';
 
 vi.mock('../../contexts/ToolActionsContext.js', async (importOriginal) => {
   const actual =
@@ -27,8 +32,19 @@ vi.mock('../../contexts/ToolActionsContext.js', async (importOriginal) => {
   };
 });
 
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof fs>();
+  return {
+    ...actual,
+    promises: {
+      ...actual.promises,
+      readFile: vi.fn(),
+    },
+  };
+});
+
 describe('ToolConfirmationMessage', () => {
-  const mockConfirm = vi.fn();
+  const mockConfirm = vi.fn().mockResolvedValue(undefined);
   vi.mocked(useToolActions).mockReturnValue({
     confirm: mockConfirm,
     cancel: vi.fn(),
@@ -361,6 +377,144 @@ describe('ToolConfirmationMessage', () => {
       );
 
       expect(lastFrame()).not.toContain('Modify with external editor');
+    });
+  });
+
+  describe('exit_plan_mode confirmation', () => {
+    const writeKey = (
+      stdin: { write: (data: string) => void },
+      key: string,
+    ) => {
+      act(() => {
+        stdin.write(key);
+      });
+    };
+
+    const waitForContentLoad = async () => {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    };
+
+    beforeEach(() => {
+      vi.mocked(fs.promises.readFile).mockResolvedValue(
+        '## Test Plan\n\n1. Do something',
+      );
+      mockConfirm.mockClear();
+      mockConfirm.mockResolvedValue(undefined);
+      vi.mocked(useToolActions).mockReturnValue({
+        confirm: mockConfirm,
+        cancel: vi.fn(),
+        isDiffingEnabled: false,
+      });
+    });
+
+    afterEach(() => {
+      vi.mocked(fs.promises.readFile).mockReset();
+    });
+
+    const exitPlanModeDetails: SerializableConfirmationDetails = {
+      type: 'exit_plan_mode',
+      title: 'Exit Plan Mode',
+      planPath: '/mock/plan.md',
+    };
+
+    it('passes approvalMode payload when first option is selected', async () => {
+      const { stdin } = renderWithProviders(
+        <ToolConfirmationMessage
+          callId="test-call-id"
+          confirmationDetails={exitPlanModeDetails}
+          config={mockConfig}
+          availableTerminalHeight={30}
+          terminalWidth={80}
+        />,
+      );
+
+      await waitForContentLoad();
+      writeKey(stdin, '\r');
+
+      await waitFor(() => {
+        expect(mockConfirm).toHaveBeenCalledWith(
+          'test-call-id',
+          ToolConfirmationOutcome.ProceedOnce,
+          { approvalMode: ApprovalMode.AUTO_EDIT },
+        );
+      });
+    });
+
+    it('passes approvalMode payload when second option is selected', async () => {
+      const { stdin } = renderWithProviders(
+        <ToolConfirmationMessage
+          callId="test-call-id"
+          confirmationDetails={exitPlanModeDetails}
+          config={mockConfig}
+          availableTerminalHeight={30}
+          terminalWidth={80}
+        />,
+      );
+
+      await waitForContentLoad();
+      writeKey(stdin, '\x1b[B'); // Down arrow
+      writeKey(stdin, '\r');
+
+      await waitFor(() => {
+        expect(mockConfirm).toHaveBeenCalledWith(
+          'test-call-id',
+          ToolConfirmationOutcome.ProceedOnce,
+          { approvalMode: ApprovalMode.DEFAULT },
+        );
+      });
+    });
+
+    it('passes feedback payload when feedback is submitted', async () => {
+      const { stdin } = renderWithProviders(
+        <ToolConfirmationMessage
+          callId="test-call-id"
+          confirmationDetails={exitPlanModeDetails}
+          config={mockConfig}
+          availableTerminalHeight={30}
+          terminalWidth={80}
+        />,
+      );
+
+      await waitForContentLoad();
+      writeKey(stdin, '\x1b[B'); // Down arrow
+      writeKey(stdin, '\x1b[B'); // Down arrow
+      for (const char of 'Add tests') {
+        writeKey(stdin, char);
+      }
+      writeKey(stdin, '\r');
+
+      await waitFor(() => {
+        expect(mockConfirm).toHaveBeenCalledWith(
+          'test-call-id',
+          ToolConfirmationOutcome.Cancel,
+          { feedback: 'Add tests' },
+        );
+      });
+    });
+
+    it('passes no payload when cancelled', async () => {
+      const { stdin } = renderWithProviders(
+        <ToolConfirmationMessage
+          callId="test-call-id"
+          confirmationDetails={exitPlanModeDetails}
+          config={mockConfig}
+          availableTerminalHeight={30}
+          terminalWidth={80}
+        />,
+      );
+
+      await waitForContentLoad();
+      writeKey(stdin, '\x1b'); // Escape
+
+      await waitFor(() => {
+        expect(mockConfirm).toHaveBeenCalledWith(
+          'test-call-id',
+          ToolConfirmationOutcome.Cancel,
+          undefined,
+        );
+      });
     });
   });
 });

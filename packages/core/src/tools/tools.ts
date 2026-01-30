@@ -18,6 +18,7 @@ import {
   type ToolConfirmationResponse,
   type Question,
 } from '../confirmation-bus/types.js';
+import type { ApprovalMode } from '../policy/types.js';
 
 /**
  * Represents a validated and ready-to-execute tool call.
@@ -701,9 +702,14 @@ export interface ToolAskUserConfirmationPayload {
   answers: { [questionIndex: string]: string };
 }
 
+export type ToolExitPlanModeConfirmationPayload =
+  | { approvalMode: ApprovalMode }
+  | { feedback: string };
+
 export type ToolConfirmationPayload =
   | ToolEditConfirmationPayload
-  | ToolAskUserConfirmationPayload;
+  | ToolAskUserConfirmationPayload
+  | ToolExitPlanModeConfirmationPayload;
 
 export interface ToolExecuteConfirmationDetails {
   type: 'exec';
@@ -742,12 +748,23 @@ export interface ToolAskUserConfirmationDetails {
   ) => Promise<void>;
 }
 
+export interface ToolExitPlanModeConfirmationDetails {
+  type: 'exit_plan_mode';
+  title: string;
+  planPath: string;
+  onConfirm: (
+    outcome: ToolConfirmationOutcome,
+    payload?: ToolConfirmationPayload,
+  ) => Promise<void>;
+}
+
 export type ToolCallConfirmationDetails =
   | ToolEditConfirmationDetails
   | ToolExecuteConfirmationDetails
   | ToolMcpConfirmationDetails
   | ToolInfoConfirmationDetails
-  | ToolAskUserConfirmationDetails;
+  | ToolAskUserConfirmationDetails
+  | ToolExitPlanModeConfirmationDetails;
 
 export enum ToolConfirmationOutcome {
   ProceedOnce = 'proceed_once',

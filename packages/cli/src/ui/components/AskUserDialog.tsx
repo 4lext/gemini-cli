@@ -336,7 +336,7 @@ const TextQuestionView: React.FC<TextQuestionViewProps> = ({
 interface OptionItem {
   key: string;
   label: string;
-  description: string;
+  description?: string;
   type: 'option' | 'other' | 'done';
   index: number;
 }

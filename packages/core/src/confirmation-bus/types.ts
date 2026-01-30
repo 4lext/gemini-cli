@@ -100,6 +100,11 @@ export type SerializableConfirmationDetails =
       type: 'ask_user';
       title: string;
       questions: Question[];
+    }
+  | {
+      type: 'exit_plan_mode';
+      title: string;
+      planPath: string;
     };
 
 export interface UpdatePolicy {
@@ -130,7 +135,7 @@ export interface ToolExecutionFailure<E = Error> {
 
 export interface QuestionOption {
   label: string;
-  description: string;
+  description?: string;
 }
 
 export enum QuestionType {
