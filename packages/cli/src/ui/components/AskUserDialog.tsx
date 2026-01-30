@@ -9,6 +9,7 @@ import { useCallback, useMemo, useRef, useEffect, useReducer } from 'react';
 import { Box, Text } from 'ink';
 import { theme } from '../semantic-colors.js';
 import type { Question } from '@google/gemini-cli-core';
+import { MarkdownDisplay } from '../utils/MarkdownDisplay.js';
 import { BaseSelectionList } from './shared/BaseSelectionList.js';
 import type { SelectionListItem } from '../hooks/useSelectionList.js';
 import { TabHeader, type Tab } from './shared/TabHeader.js';
@@ -21,6 +22,33 @@ import { getCachedStringWidth } from '../utils/textUtils.js';
 import { useTabbedNavigation } from '../hooks/useTabbedNavigation.js';
 import { DialogFooter } from './shared/DialogFooter.js';
 import { MaxSizedBox } from './shared/MaxSizedBox.js';
+
+// Shared component for rendering question context
+interface QuestionContextProps {
+  context: string | undefined;
+  maxHeight: number;
+  width: number;
+}
+
+const QuestionContext: React.FC<QuestionContextProps> = ({
+  context,
+  maxHeight,
+  width,
+}) => {
+  if (!context?.trim()) return null;
+
+  return (
+    <Box marginBottom={1} flexDirection="column">
+      <MaxSizedBox maxHeight={maxHeight} overflowDirection="bottom">
+        <MarkdownDisplay
+          text={context}
+          isPending={false}
+          terminalWidth={width}
+        />
+      </MaxSizedBox>
+    </Box>
+  );
+};
 
 interface AskUserDialogState {
   answers: { [key: string]: string };
@@ -275,21 +303,18 @@ const TextQuestionView: React.FC<TextQuestionViewProps> = ({
 
   const placeholder = question.placeholder || 'Enter your response';
 
-  const HEADER_HEIGHT = progressHeader ? 2 : 0;
-  const INPUT_HEIGHT = 2; // TextInput + margin
-  const FOOTER_HEIGHT = 2; // DialogFooter + margin
-  const overhead = HEADER_HEIGHT + INPUT_HEIGHT + FOOTER_HEIGHT;
-  const questionHeight = Math.max(1, availableHeight - overhead);
-
   return (
     <Box flexDirection="column">
       {progressHeader}
+      <QuestionContext
+        context={question.context}
+        maxHeight={availableHeight}
+        width={availableWidth}
+      />
       <Box marginBottom={1}>
-        <MaxSizedBox maxHeight={questionHeight} maxWidth={availableWidth}>
-          <Text bold color={theme.text.primary}>
-            {question.question}
-          </Text>
-        </MaxSizedBox>
+        <Text bold color={theme.text.primary}>
+          {question.question}
+        </Text>
       </Box>
 
       <Box flexDirection="row" marginBottom={1}>
@@ -707,32 +732,26 @@ const ChoiceQuestionView: React.FC<ChoiceQuestionViewProps> = ({
     }
   }, [customOptionText, isCustomOptionSelected, question.multiSelect]);
 
-  const HEADER_HEIGHT = progressHeader ? 2 : 0;
-  const TITLE_MARGIN = 1;
-  const FOOTER_HEIGHT = 2; // DialogFooter + margin
-  const overhead = HEADER_HEIGHT + TITLE_MARGIN + FOOTER_HEIGHT;
-  const listHeight = Math.max(1, availableHeight - overhead);
-  const questionHeight = Math.min(3, Math.max(1, listHeight - 4));
-  const maxItemsToShow = Math.max(
-    1,
-    Math.floor((listHeight - questionHeight) / 2),
-  );
+  const maxItemsToShow = Math.max(3, Math.floor(availableHeight / 3));
 
   return (
     <Box flexDirection="column">
       {progressHeader}
-      <Box marginBottom={TITLE_MARGIN}>
-        <MaxSizedBox maxHeight={questionHeight} maxWidth={availableWidth}>
-          <Text bold color={theme.text.primary}>
-            {question.question}
-            {question.multiSelect && (
-              <Text color={theme.text.secondary} italic>
-                {' '}
-                (Select all that apply)
-              </Text>
-            )}
-          </Text>
-        </MaxSizedBox>
+      <QuestionContext
+        context={question.context}
+        maxHeight={availableHeight}
+        width={availableWidth}
+      />
+      <Box marginBottom={1}>
+        <Text bold color={theme.text.primary}>
+          {question.question}
+          {question.multiSelect && (
+            <Text color={theme.text.secondary} italic>
+              {' '}
+              (Select all that apply)
+            </Text>
+          )}
+        </Text>
       </Box>
 
       <BaseSelectionList<OptionItem>
@@ -753,7 +772,8 @@ const ChoiceQuestionView: React.FC<ChoiceQuestionViewProps> = ({
 
           // Render inline text input for custom option
           if (optionItem.type === 'other') {
-            const placeholder = 'Enter a custom value';
+            const placeholder =
+              question.customOptionPlaceholder || 'Enter a custom value';
             return (
               <Box flexDirection="row">
                 {showCheck && (

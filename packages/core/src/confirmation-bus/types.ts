@@ -150,6 +150,10 @@ export interface Question {
   multiSelect?: boolean;
   /** Placeholder hint text. Only applies when type='text'. */
   placeholder?: string;
+  /** Markdown context to display before the question. */
+  context?: string;
+  /** Placeholder for the custom "Other" option input. Only applies when type='choice'. Defaults to 'Enter a custom value'. */
+  customOptionPlaceholder?: string;
 }
 
 export interface AskUserRequest {

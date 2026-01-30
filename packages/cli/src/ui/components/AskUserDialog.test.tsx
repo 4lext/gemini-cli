@@ -946,4 +946,159 @@ describe('AskUserDialog', () => {
       });
     });
   });
+
+  describe('Rich context support', () => {
+    it('renders markdown context before the question for choice type', () => {
+      const questionWithContext: Question[] = [
+        {
+          question: 'Which database should we use?',
+          header: 'Database',
+          context:
+            '## Context\n\nWe need a database that supports:\n- High availability\n- Horizontal scaling',
+          options: [
+            { label: 'PostgreSQL', description: 'Relational database' },
+            { label: 'MongoDB', description: 'Document database' },
+          ],
+          multiSelect: false,
+        },
+      ];
+
+      const { lastFrame } = renderWithProviders(
+        <AskUserDialog
+          questions={questionWithContext}
+          onSubmit={vi.fn()}
+          onCancel={vi.fn()}
+          width={120}
+          availableHeight={20}
+        />,
+        { width: 120 },
+      );
+
+      expect(lastFrame()).toMatchSnapshot();
+    });
+
+    it('renders markdown context before the question for text type', () => {
+      const questionWithContext: Question[] = [
+        {
+          question: 'Enter the API endpoint:',
+          header: 'API',
+          type: QuestionType.TEXT,
+          context:
+            '### API Configuration\n\nPlease provide the full URL including the protocol.',
+        },
+      ];
+
+      const { lastFrame } = renderWithProviders(
+        <AskUserDialog
+          questions={questionWithContext}
+          onSubmit={vi.fn()}
+          onCancel={vi.fn()}
+          width={120}
+          availableHeight={20}
+        />,
+        { width: 120 },
+      );
+
+      expect(lastFrame()).toMatchSnapshot();
+    });
+
+    it('uses custom placeholder for the Other option', async () => {
+      const questionWithCustomPlaceholder: Question[] = [
+        {
+          question: 'Which cloud provider?',
+          header: 'Cloud',
+          options: [
+            { label: 'AWS', description: 'Amazon Web Services' },
+            { label: 'GCP', description: 'Google Cloud Platform' },
+          ],
+          multiSelect: false,
+          customOptionPlaceholder: 'Type your cloud provider...',
+        },
+      ];
+
+      const { stdin, lastFrame } = renderWithProviders(
+        <AskUserDialog
+          questions={questionWithCustomPlaceholder}
+          onSubmit={vi.fn()}
+          onCancel={vi.fn()}
+          width={120}
+          availableHeight={20}
+        />,
+        { width: 120 },
+      );
+
+      // Navigate to custom option
+      writeKey(stdin, '\x1b[B');
+      writeKey(stdin, '\x1b[B');
+
+      await waitFor(() => {
+        expect(lastFrame()).toMatchSnapshot();
+      });
+    });
+
+    it.each([
+      { name: 'undefined', context: undefined },
+      { name: 'empty string', context: '' },
+      { name: 'whitespace only', context: '   ' },
+    ])('does not render context when $name', ({ context }) => {
+      const question: Question[] = [
+        {
+          question: 'Which option?',
+          header: 'Option',
+          context,
+          options: [
+            { label: 'A', description: 'Option A' },
+            { label: 'B', description: 'Option B' },
+          ],
+          multiSelect: false,
+        },
+      ];
+
+      const { lastFrame } = renderWithProviders(
+        <AskUserDialog
+          questions={question}
+          onSubmit={vi.fn()}
+          onCancel={vi.fn()}
+          width={120}
+          availableHeight={20}
+        />,
+        { width: 120 },
+      );
+
+      expect(lastFrame()).toMatchSnapshot();
+    });
+
+    it('truncates long context with hidden lines indicator', () => {
+      const longContext = Array.from(
+        { length: 20 },
+        (_, i) => `- Step ${i + 1}: Do something important`,
+      ).join('\n');
+
+      const questionWithLongContext: Question[] = [
+        {
+          question: 'Approve this plan?',
+          header: 'Plan',
+          context: `## Implementation Plan\n\n${longContext}`,
+          options: [
+            { label: 'Yes', description: 'Approve and proceed' },
+            { label: 'No', description: 'Reject the plan' },
+          ],
+          multiSelect: false,
+        },
+      ];
+
+      const { lastFrame } = renderWithProviders(
+        <AskUserDialog
+          questions={questionWithLongContext}
+          onSubmit={vi.fn()}
+          onCancel={vi.fn()}
+          width={80}
+          availableHeight={15}
+        />,
+        { width: 80 },
+      );
+
+      expect(lastFrame()).toMatchSnapshot();
+    });
+  });
 });

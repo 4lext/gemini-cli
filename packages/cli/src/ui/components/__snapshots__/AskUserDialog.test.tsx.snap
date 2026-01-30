@@ -1,5 +1,112 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`AskUserDialog > Rich context support > does not render context when 'empty string' 1`] = `
+"Which option?
+
+● 1.  A
+      Option A
+  2.  B
+      Option B
+  3.  Enter a custom value
+
+Enter to select · ↑/↓ to navigate · Esc to cancel"
+`;
+
+exports[`AskUserDialog > Rich context support > does not render context when 'undefined' 1`] = `
+"Which option?
+
+● 1.  A
+      Option A
+  2.  B
+      Option B
+  3.  Enter a custom value
+
+Enter to select · ↑/↓ to navigate · Esc to cancel"
+`;
+
+exports[`AskUserDialog > Rich context support > does not render context when 'whitespace only' 1`] = `
+"Which option?
+
+● 1.  A
+      Option A
+  2.  B
+      Option B
+  3.  Enter a custom value
+
+Enter to select · ↑/↓ to navigate · Esc to cancel"
+`;
+
+exports[`AskUserDialog > Rich context support > renders markdown context before the question for choice type 1`] = `
+"Context
+
+We need a database that supports:
+ - High availability
+ - Horizontal scaling
+
+Which database should we use?
+
+● 1.  PostgreSQL
+      Relational database
+  2.  MongoDB
+      Document database
+  3.  Enter a custom value
+
+Enter to select · ↑/↓ to navigate · Esc to cancel"
+`;
+
+exports[`AskUserDialog > Rich context support > renders markdown context before the question for text type 1`] = `
+"API Configuration
+
+Please provide the full URL including the protocol.
+
+Enter the API endpoint:
+
+> Enter your response
+
+
+Enter to submit · Esc to cancel"
+`;
+
+exports[`AskUserDialog > Rich context support > truncates long context with hidden lines indicator 1`] = `
+"Implementation Plan
+
+ - Step 1: Do something important
+ - Step 2: Do something important
+ - Step 3: Do something important
+ - Step 4: Do something important
+ - Step 5: Do something important
+ - Step 6: Do something important
+ - Step 7: Do something important
+ - Step 8: Do something important
+ - Step 9: Do something important
+ - Step 10: Do something important
+ - Step 11: Do something important
+ - Step 12: Do something important
+... last 8 lines hidden ...
+
+Approve this plan?
+
+● 1.  Yes
+      Approve and proceed
+  2.  No
+      Reject the plan
+  3.  Enter a custom value
+
+Enter to select · ↑/↓ to navigate · Esc to cancel"
+`;
+
+exports[`AskUserDialog > Rich context support > uses custom placeholder for the Other option 1`] = `
+"Which cloud provider?
+
+  1.  AWS
+      Amazon Web Services
+  2.  GCP
+      Google Cloud Platform
+● 3.  Type your cloud provider...
+
+Enter to submit · Esc to cancel"
+`;
+
 exports[`AskUserDialog > Text type questions > renders text input for type: "text" 1`] = `
 "What should we name this component?
 
@@ -112,6 +219,8 @@ exports[`AskUserDialog > shows scroll arrows when options exceed available heigh
        Description 1
    2.  Option 2
        Description 2
+   3.  Option 3
+       Description 3
 ▼
 
 Enter to select · ↑/↓ to navigate · Esc to cancel"
