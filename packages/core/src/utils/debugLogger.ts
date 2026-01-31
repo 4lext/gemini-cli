@@ -19,11 +19,17 @@ import * as util from 'node:util';
  * HOW IT WORKS:
  * This is a thin wrapper around the native `console` object. The `ConsolePatcher`
  * will intercept these calls and route them to the debug drawer UI.
+ *
+ * NATIVE_HOST_MODE:
+ * When NATIVE_HOST_MODE=true, stdout is reserved for Chrome Native Messaging.
+ * In this mode, log() and debug() redirect to stderr to prevent protocol corruption.
  */
 class DebugLogger {
   private logStream: fs.WriteStream | undefined;
+  private isNativeHostMode: boolean;
 
   constructor() {
+    this.isNativeHostMode = process.env['NATIVE_HOST_MODE'] === 'true';
     this.logStream = process.env['GEMINI_DEBUG_LOG_FILE']
       ? fs.createWriteStream(process.env['GEMINI_DEBUG_LOG_FILE'], {
           flags: 'a',
@@ -47,7 +53,12 @@ class DebugLogger {
 
   log(...args: unknown[]): void {
     this.writeToFile('LOG', args);
-    console.log(...args);
+    // NATIVE_HOST_MODE: redirect to stderr to prevent stdout pollution
+    if (this.isNativeHostMode) {
+      console.error(...args);
+    } else {
+      console.log(...args);
+    }
   }
 
   warn(...args: unknown[]): void {
@@ -62,7 +73,12 @@ class DebugLogger {
 
   debug(...args: unknown[]): void {
     this.writeToFile('DEBUG', args);
-    console.debug(...args);
+    // NATIVE_HOST_MODE: redirect to stderr to prevent stdout pollution
+    if (this.isNativeHostMode) {
+      console.error(...args);
+    } else {
+      console.debug(...args);
+    }
   }
 }
 
