@@ -91,7 +91,8 @@ describe('Agent Server Endpoints', () => {
     testWorkspace = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gemini-agent-test-'),
     );
-    app = await createApp();
+    const result = await createApp();
+    app = result.app;
     await new Promise<void>((resolve) => {
       server = app.listen(0, () => {
         const port = (server.address() as AddressInfo).port;

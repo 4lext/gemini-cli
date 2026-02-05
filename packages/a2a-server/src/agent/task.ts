@@ -196,6 +196,14 @@ export class Task {
     return this.toolCompletionPromise;
   }
 
+  /**
+   * Returns true if there are any pending tool calls awaiting execution.
+   * Used by executor to determine if socket close should abort the task.
+   */
+  hasPendingToolCalls(): boolean {
+    return this.pendingToolCalls.size > 0;
+  }
+
   cancelPendingTools(reason: string): void {
     if (this.pendingToolCalls.size > 0) {
       logger.info(

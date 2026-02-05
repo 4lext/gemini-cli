@@ -317,8 +317,35 @@ export class CoderAgentExecutor implements AgentExecutor {
       // Grab the raw socket from the request object
       const socket = store.req.socket;
       const onClientEnd = () => {
+        // ─────────────────────────────────────────────────────────────────────
+        // BUG FIX: Conditional abort based on task state
+        // ─────────────────────────────────────────────────────────────────────
+        // The original logic aborted the task whenever ANY socket closed. This
+        // is incorrect for A2A protocol where:
+        // - HTTP connections are transient (one per request)
+        // - Tasks are long-lived (can span multiple requests)
+        // - Tool confirmations are sent as separate requests that close after ACK
+        //
+        // We should ONLY abort if the task is in a streaming generation phase
+        // (no pending tools). If tools are executing, let them complete.
+        //
+        // @see https://github.com/google-gemini/gemini-cli/issues/XXX (if applicable)
+        // ─────────────────────────────────────────────────────────────────────
+        const wrapper = this.tasks.get(taskId);
+        const hasPendingTools = wrapper?.task?.hasPendingToolCalls() ?? false;
+        const isExecuting = this.executingTasks.has(taskId);
+
+        if (hasPendingTools || isExecuting) {
+          logger.info(
+            `[CoderAgentExecutor] Client socket closed for task ${taskId}, but task has pending work (pendingTools=${hasPendingTools}, isExecuting=${isExecuting}). NOT aborting.`,
+          );
+          // Clean up the listener but do NOT abort
+          socket.removeListener('close', onClientEnd);
+          return;
+        }
+
         logger.info(
-          `[CoderAgentExecutor] Client socket closed for task ${taskId}. Cancelling execution.`,
+          `[CoderAgentExecutor] Client socket closed for task ${taskId}. No pending work, cancelling execution.`,
         );
         if (!abortController.signal.aborted) {
           abortController.abort();

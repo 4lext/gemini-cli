@@ -7,3 +7,4 @@
 export * from './agent/executor.js';
 export * from './http/app.js';
 export * from './types.js';
+export * from './hooks/temporal-hook-interceptor.js';

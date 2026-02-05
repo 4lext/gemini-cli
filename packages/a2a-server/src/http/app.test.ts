@@ -107,7 +107,8 @@ describe('E2E Tests', () => {
   let server: Server;
 
   beforeAll(async () => {
-    app = await createApp();
+    const result = await createApp();
+    app = result.app;
     server = app.listen(0); // Listen on a random available port
   });
 

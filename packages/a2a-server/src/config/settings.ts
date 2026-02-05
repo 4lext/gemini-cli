@@ -42,6 +42,48 @@ export interface Settings {
     enableRecursiveFileSearch?: boolean;
     customIgnoreFilePaths?: string[];
   };
+
+  /**
+   * Hooks configuration for tool lifecycle observability.
+   * @see https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks.md
+   */
+  hooksConfig?: {
+    enabled?: boolean;
+    notifications?: boolean;
+    disabled?: string[];
+  };
+
+  /**
+   * Hook definitions keyed by event name (BeforeTool, AfterTool, etc.)
+   * Each hook definition specifies a command to execute.
+   */
+  hooks?: {
+    BeforeTool?: HookDefinition[];
+    AfterTool?: HookDefinition[];
+    [key: string]: HookDefinition[] | undefined;
+  };
+}
+
+/**
+ * Hook definition for CLI tool lifecycle events.
+ * @see ConfigParameters.hooks in @google/gemini-cli-core
+ */
+export interface HookDefinition {
+  matcher?: string;
+  sequential?: boolean;
+  hooks: HookConfig[];
+}
+
+/**
+ * Individual hook command configuration.
+ */
+export interface HookConfig {
+  type: 'command';
+  command: string;
+  name?: string;
+  description?: string;
+  timeout?: number;
+  env?: Record<string, string>;
 }
 
 export interface SettingsError {

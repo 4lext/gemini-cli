@@ -105,6 +105,11 @@ export async function loadConfig(
     interactive: true,
     enableInteractiveShell: true,
     ptyInfo: 'auto',
+    // Hook system for tool lifecycle observability
+    enableHooks: settings.hooksConfig?.enabled ?? true,
+    enableHooksUI: settings.hooksConfig?.notifications ?? false,
+    disabledHooks: settings.hooksConfig?.disabled,
+    hooks: settings.hooks as { [key: string]: unknown[] } | undefined,
   };
 
   const fileService = new FileDiscoveryService(workspaceDir, {

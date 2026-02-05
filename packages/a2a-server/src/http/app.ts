@@ -148,7 +148,24 @@ async function handleExecuteCommand(
   }
 }
 
-export async function createApp() {
+/**
+ * Result of createApp() containing the Express app and related services.
+ */
+export interface CreateAppResult {
+  /** The configured Express application */
+  app: ReturnType<typeof express>;
+  /** The loaded gemini-cli-core config (provides access to HookSystem, etc.) */
+  config: Awaited<ReturnType<typeof loadConfig>>;
+  /** The agent executor instance */
+  agentExecutor: CoderAgentExecutor;
+}
+
+/**
+ * Creates the A2A Express application with all middleware and routes configured.
+ *
+ * @returns The Express app along with the config for optional hook installation
+ */
+export async function createApp(): Promise<CreateAppResult> {
   try {
     // Load the server configuration once on startup.
     const workspaceRoot = setTargetDir(undefined);
@@ -316,7 +333,109 @@ export async function createApp() {
       }
       res.json({ metadata: await wrapper.task.getMetadata() });
     });
-    return expressApp;
+
+    /**
+     * Custom endpoint for tool confirmation.
+     *
+     * Unlike `message/send`, this endpoint does NOT block waiting for task completion.
+     * It processes the tool confirmation and returns immediately.
+     *
+     * @param callId - The tool call ID to confirm
+     * @param outcome - 'proceed_once' | 'cancel' | 'proceed_always' | etc.
+     */
+    expressApp.post('/tasks/:taskId/confirmation', async (req, res) => {
+      const taskId = req.params.taskId;
+      const { callId, outcome } = req.body as {
+        callId: string;
+        outcome: string;
+      };
+
+      if (!callId || !outcome) {
+        res
+          .status(400)
+          .json({ error: 'Missing callId or outcome in request body' });
+        return;
+      }
+
+      logger.info(
+        `[ToolConfirmation] Received confirmation for task ${taskId}`,
+        { callId, outcome },
+      );
+
+      let wrapper = agentExecutor.getTask(taskId);
+      if (!wrapper) {
+        const sdkTask = await taskStoreForExecutor.load(taskId);
+        if (sdkTask) {
+          wrapper = await agentExecutor.reconstruct(sdkTask);
+        }
+      }
+      if (!wrapper) {
+        logger.error(`[ToolConfirmation] Task not found: ${taskId}`);
+        res.status(404).json({ error: 'Task not found' });
+        return;
+      }
+
+      try {
+        // Create a message with the confirmation data part
+        const confirmationMessage = {
+          kind: 'message' as const,
+          role: 'user' as const,
+          messageId: `confirm-${callId}-${Date.now()}`,
+          taskId,
+          parts: [
+            {
+              kind: 'data' as const,
+              data: { callId, outcome },
+            },
+          ],
+        };
+
+        // Create a minimal request context for the confirmation
+        const requestContext = {
+          taskId,
+          contextId: taskId, // Use taskId as contextId for confirmation messages
+          userMessage: confirmationMessage,
+        };
+
+        // Process the confirmation asynchronously - don't wait for task completion
+        // The acceptUserMessage will handle the confirmation and trigger scheduler
+        const abortController = new AbortController();
+
+        // Fire and forget - consume the generator in the background
+        void (async () => {
+          try {
+            const generator = wrapper.task.acceptUserMessage(
+              requestContext,
+              abortController.signal,
+            );
+            // Consume the generator (should yield nothing for confirmation-only messages)
+             
+            for await (const _ of generator) {
+              // Just drain the generator
+            }
+            logger.info(
+              `[ToolConfirmation] Confirmation processed for task ${taskId}`,
+              { callId },
+            );
+          } catch (error) {
+            logger.error(
+              `[ToolConfirmation] Error processing confirmation for task ${taskId}`,
+              error,
+            );
+          }
+        })();
+
+        // Return immediately - don't wait for task completion
+        res.status(202).json({ accepted: true, callId, outcome });
+      } catch (error) {
+        logger.error('[ToolConfirmation] Error handling confirmation:', error);
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        res.status(500).json({ error: errorMessage });
+      }
+    });
+
+    return { app: expressApp, config, agentExecutor };
   } catch (error) {
     logger.error('[CoreAgent] Error during startup:', error);
     process.exit(1);
@@ -325,7 +444,7 @@ export async function createApp() {
 
 export async function main() {
   try {
-    const expressApp = await createApp();
+    const { app: expressApp } = await createApp();
     const port = Number(process.env['CODER_AGENT_PORT'] || 0);
 
     const server = expressApp.listen(port, 'localhost', () => {
